@@ -6,6 +6,7 @@ use app\models\Book;
 use app\models\Subscription;
 use app\services\base\BaseService;
 use app\services\interfaces\NotificationQueueServiceInterface;
+use Yii;
 
 class SubscriptionNotificationQueueService extends BaseService implements NotificationQueueServiceInterface
 {
@@ -13,27 +14,24 @@ class SubscriptionNotificationQueueService extends BaseService implements Notifi
      * Добавляет уведомления о новой книге в очередь подписчиков авторов
      * @param Book $book
      */
-    public function enqueueNotifications(Book $book) : void
+    public function enqueueNotifications(Book $book): void
     {
         if (empty($book->authorIds)) {
             return;
         }
 
-        foreach ($book->authorIds as $authorId) {
-            $subscriptions = Subscription::find()->where(['author_id' => $authorId])->all();
+        $authorIds = implode(',', array_map('intval', $book->authorIds));
 
-            foreach ($subscriptions as $subscription) {
-                if (empty($subscription->phone)) {
-                    continue;
-                }
+        $db = Yii::$app->db;
 
-                $queueItem = new SubscribeQueueSms();
-                $queueItem->subscription_id = $subscription->id;
-                $queueItem->message = "Новая книга от автора: \"{$book->title}\"";
-                $queueItem->status = 'pending';
+        $sql = "
+        INSERT INTO {{%subscribe_queue_sms}} (subscription_id, message, status)
+        SELECT s.id, CONCAT('Новая книга от автора: \"', :title, '\"'), 'pending'
+        FROM {{%subscription}} s
+        WHERE s.author_id IN ($authorIds)
+          AND s.phone IS NOT NULL
+        ";
 
-                $queueItem->save();
-            }
-        }
+        $db->createCommand($sql, [':title' => $book->title])->execute();
     }
 }
